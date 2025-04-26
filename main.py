@@ -1,0 +1,29 @@
+import os
+from telegram.ext import ApplicationBuilder, CommandHandler
+from commands import (
+    setlogin, check, myxp, mylevel, myprojects, mybadges,
+    myskills, logtime, addfriend, removefriend,
+    listfriends, checkall
+)
+from keep_alive import keep_alive
+
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+if __name__ == '__main__':
+    keep_alive()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("setlogin", setlogin))
+    app.add_handler(CommandHandler("check", check))
+    app.add_handler(CommandHandler("myxp", myxp))
+    app.add_handler(CommandHandler("mylevel", mylevel))
+    app.add_handler(CommandHandler("myprojects", myprojects))
+    app.add_handler(CommandHandler("mybadges", mybadges))
+    app.add_handler(CommandHandler("myskills", myskills))
+    app.add_handler(CommandHandler("logtime", logtime))
+    app.add_handler(CommandHandler("addfriend", addfriend))
+    app.add_handler(CommandHandler("removefriend", removefriend))
+    app.add_handler(CommandHandler("listfriends", listfriends))
+    app.add_handler(CommandHandler("checkall", checkall))
+
+    app.run_polling()
