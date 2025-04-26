@@ -3,7 +3,6 @@ import requests
 from telegram import Update
 from telegram.ext import ContextTypes
 
-# Переменная токена от School21
 SCHOOL21_API_TOKEN = os.getenv("SCHOOL21_API_TOKEN")
 
 # Временное хранилище логинов и друзей
@@ -26,9 +25,10 @@ def get_user_info(login):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет!\n\n"
-        "Этот бот создан для студентов Школы 21, чтобы отслеживать XP, друзей в кампусе и прогресс по проектам.\n\n"
-        "Авторы: Дима:TG @OdintD sh21: whirlpon ; Арси TG @arildmt sh21: fernaani \n""
-        "Есть идеи или вопросы? Пишите прямо в личку!"
+        "Этот бот был разработан для студентов Школы 21, чтобы отслеживать XP, друзей в кампусе и прогресс по проектам.\n\n"
+        "Авторы:\n"
+        "Дима — TG: @OdintD | sh21: whirlpon\n"
+        "Арси — TG: @arildmt | sh21: fernaani\n"
     )
 
 # Команда /setlogin
@@ -194,4 +194,3 @@ async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Сейчас в кампусе:\n" + "\n".join(online_friends))
     else:
         await update.message.reply_text("Никто из друзей сейчас не в кампусе.")
-    await update.message.reply_text("Команда /checkall ещё не реализована.")
