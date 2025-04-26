@@ -9,7 +9,7 @@ from commands import (
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 PORT = int(os.environ.get('PORT', 8080))  # Render использует переменную PORT
 
-if name == '__main__':
+if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("setlogin", setlogin))
