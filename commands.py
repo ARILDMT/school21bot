@@ -1,122 +1,59 @@
-import os
 from telegram import Update
 from telegram.ext import ContextTypes
-import school21_api as api
 
-# Временное хранилище: Telegram user ID → login школы
-user_logins = {}
+# Команда /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Привет!\n\n"
+        "Этот бот был разработан для студентов Школы 21, чтобы отслеживать XP, друзей в кампусе и прогресс по проектам.\n\n"
+        "Авторы: Дима:TG @OdintD sh21: whirlpon ; Арси TG @arildmt sh21: fernaani \n"
+        "Есть идеи или хотите дополнить бота? Пишите прямо в личку!"
+    )
 
-def get_login(update: Update):
-    tg_id = update.effective_user.id
-    return user_logins.get(tg_id)
-
-# /setlogin <school_login>
+# Команда /setlogin
 async def setlogin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("Пример: /setlogin workerom")
-        return
-    tg_id = update.effective_user.id
-    user_logins[tg_id] = context.args[0]
-    await update.message.reply_text(f"Логин {context.args[0]} сохранён.")
+    await update.message.reply_text("Команда /setlogin ещё не реализована.")
 
-# /check <login>
+# Команда /check
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("Пример: /check bibikov-lukyan")
-        return
-    login = context.args[0]
-    result = api.check_user_online(login)
-    await update.message.reply_text(result)
+    await update.message.reply_text("Команда /check ещё не реализована.")
 
-# /myxp
+# Команда /myxp
 async def myxp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = get_login(update)
-    if not login:
-        await update.message.reply_text("Сначала введи логин через /setlogin <логин>")
-        return
-    result = api.get_user_xp(login)
-    await update.message.reply_text(result)
+    await update.message.reply_text("Команда /myxp ещё не реализована.")
 
-# /mylevel
+# Команда /mylevel
 async def mylevel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = get_login(update)
-    if not login:
-        await update.message.reply_text("Сначала введи логин через /setlogin <логин>")
-        return
-    result = api.get_user_level(login)
-    await update.message.reply_text(result)
+    await update.message.reply_text("Команда /mylevel ещё не реализована.")
 
-# /myprojects
+# Команда /myprojects
 async def myprojects(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = get_login(update)
-    if not login:
-        await update.message.reply_text("Сначала введи логин через /setlogin <логин>")
-        return
-    result = api.get_user_projects(login)
-    await update.message.reply_text(result)
+    await update.message.reply_text("Команда /myprojects ещё не реализована.")
 
-# /mybadges
+# Команда /mybadges
 async def mybadges(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = get_login(update)
-    if not login:
-        await update.message.reply_text("Сначала введи логин через /setlogin <логин>")
-        return
-    result = api.get_user_badges(login)
-    await update.message.reply_text(result)
+    await update.message.reply_text("Команда /mybadges ещё не реализована.")
 
-# /myskills
+# Команда /myskills
 async def myskills(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = get_login(update)
-    if not login:
-        await update.message.reply_text("Сначала введи логин через /setlogin <логин>")
-        return
-    result = api.get_user_skills(login)
-    await update.message.reply_text(result)
+    await update.message.reply_text("Команда /myskills ещё не реализована.")
 
-# /logtime
+# Команда /logtime
 async def logtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = get_login(update)
-    if not login:
-        await update.message.reply_text("Сначала введи логин через /setlogin <логин>")
-        return
-    result = api.get_user_logtime(login)
-    await update.message.reply_text(result)
+    await update.message.reply_text("Команда /logtime ещё не реализована.")
 
-# Временное хранилище друзей
-friends = set()
-
-# /addfriend <login>
+# Команда /addfriend
 async def addfriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("Пример: /addfriend fernaani")
-        return
-    login = context.args[0]
-    friends.add(login)
-    await update.message.reply_text(f"{login} добавлен в список друзей.")
+    await update.message.reply_text("Команда /addfriend ещё не реализована.")
 
-# /removefriend <login>
+# Команда /removefriend
 async def removefriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("Пример: /removefriend fernaani")
-        return
-    login = context.args[0]
-    friends.discard(login)
-    await update.message.reply_text(f"{login} удалён из списка друзей.")
+    await update.message.reply_text("Команда /removefriend ещё не реализована.")
 
-# /listfriends
+# Команда /listfriends
 async def listfriends(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not friends:
-        await update.message.reply_text("У тебя пока нет друзей в списке.")
-    else:
-        await update.message.reply_text("Твои друзья:\n" + "\n".join(friends))
+    await update.message.reply_text("Команда /listfriends ещё не реализована.")
 
-# /checkall
+# Команда /checkall
 async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not friends:
-        await update.message.reply_text("Список друзей пуст.")
-        return
-    messages = []
-    for login in friends:
-        status = api.check_user_online(login)
-        messages.append(f"{login}: {status}")
-    await update.message.reply_text("\n\n".join(messages))
+    await update.message.reply_text("Команда /checkall ещё не реализована.")
