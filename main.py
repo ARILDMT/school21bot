@@ -5,12 +5,11 @@ from commands import (
     myskills, logtime, addfriend, removefriend,
     listfriends, checkall
 )
-from keep_alive import keep_alive
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+PORT = int(os.environ.get('PORT', 8080))  # Render использует переменную PORT
 
-if __name__ == '__main__':
-    keep_alive()
+if name == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("setlogin", setlogin))
@@ -26,4 +25,9 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("listfriends", listfriends))
     app.add_handler(CommandHandler("checkall", checkall))
 
-    app.run_polling()
+    # Внимание! Вот правильный запуск через Webhook
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/"
+    )
