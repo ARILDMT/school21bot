@@ -1,15 +1,11 @@
-import os
-import requests
+import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
+from school21_api import authenticate, api_get
 
-# Берем токен из переменных окружения
-API_TOKEN = os.getenv('SCHOOL21_API_TOKEN')
+# in-memory хранилище
+users_data = {}
 
-# Словарь для хранения логинов пользователей
-user_logins = {}
-
-# Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "Привет!\n\n"
@@ -18,145 +14,205 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Дима — TG: @OdintD | sh21: whirlpon\n"
         "Арси — TG: @arildmt | sh21: fernaani\n"
     )
-
-    # Клавиатура с командами
     keyboard = [
-        ["/setlogin", "/check", "/checkall"],
+        ["/auth", "/check", "/checkall"],
         ["/myxp", "/mylevel"],
         ["/myprojects", "/myskills", "/mybadges"],
         ["/logtime", "/addfriend", "/removefriend", "/listfriends"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
     await update.message.reply_text(text, reply_markup=reply_markup)
 
-# Сохраняем логин пользователя
-async def setlogin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        login = context.args[0]
-        user_logins[update.effective_user.id] = login
-        await update.message.reply_text(f"Ваш логин сохранен: {login}")
-    else:
-        await update.message.reply_text("Пожалуйста, укажите ваш логин после команды.")
+async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) != 2:
+        await update.message.reply_text("Использование: /auth <login> <password>")
+        return
+    login, password = context.args
+    at, rt, exp = authenticate(login, password)
+    if at is None:
+        await update.message.reply_text("Неверный логин или пароль. Попробуйте снова.")
+        return
+    uid = update.effective_user.id
+    users_data[uid] = {
+        'login': login,
+        'access_token': at,
+        'refresh_token': rt,
+        'expires_at': exp,
+        'friends': []
+    }
+    await update.message.reply_text(f"Успешно авторизованы как {login}.")
 
-# Проверка присутствия в кампусе
+def get_user_data(uid):
+    return users_data.get(uid)
+
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        login = context.args[0]
-    else:
-        login = user_logins.get(update.effective_user.id)
-
-    if not login:
-        await update.message.reply_text("Сначала установите логин через /setlogin.")
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth <login> <password>.")
         return
-
-    url = f"https://edu-api.21-school.ru/services/21-school/api/v1/campus/{login}/location"
-    headers = {"Authorization": API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        data = response.json()
-        if data.get("clusterName"):
-            cluster = data["clusterName"]
-            row = data["row"]
-            number = data["number"]
-            await update.message.reply_text(f"Кластер: {cluster}, Ряд: {row}, Место: {number}")
-        else:
-            await update.message.reply_text("Тебя нет в кампусе.")
-    else:
-        await update.message.reply_text("Не удалось получить данные о кампусе.")
-
-# Получение XP
-async def myxp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = user_logins.get(update.effective_user.id)
-    if not login:
-        await update.message.reply_text("Сначала установите логин через /setlogin.")
+    target = context.args[0] if context.args else udata['login']
+    resp, err = api_get(udata, f"/participants/{target}/workstation")
+    if err == 'auth_error' or resp is None:
+        await update.message.reply_text("Ошибка авторизации, введите /auth заново.")
         return
-
-    url = f"https://edu-api.21-school.ru/services/21-school/api/v1/users/{login}/xp"
-    headers = {"Authorization": API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        xp_data = response.json()
-        xp = sum(item.get("amount", 0) for item in xp_data)
-        await update.message.reply_text(f"Ваш XP: {xp}")
+    if resp.status_code == 200:
+        d = resp.json()
+        await update.message.reply_text(
+            f"{target}: кластер {d['clusterName']}, ряд {d['row']}, место {d['number']}"
+        )
+    elif resp.status_code == 404:
+        await update.message.reply_text(f"{target}: не в кампусе.")
     else:
-        await update.message.reply_text("Не удалось получить XP.")
+        await update.message.reply_text("Ошибка получения данных.")
 
-# Получение уровня
-async def mylevel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = user_logins.get(update.effective_user.id)
-    if not login:
-        await update.message.reply_text("Сначала установите логин через /setlogin.")
-        return
-
-    url = f"https://edu-api.21-school.ru/services/21-school/api/v1/users/{login}"
-    headers = {"Authorization": API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        user_info = response.json()
-        level = user_info.get("level", "Неизвестно")
-        await update.message.reply_text(f"Ваш уровень: {level}")
-    else:
-        await update.message.reply_text("Не удалось получить уровень.")
-
-# Получение списка проектов
-async def myprojects(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = user_logins.get(update.effective_user.id)
-    if not login:
-        await update.message.reply_text("Сначала установите логин через /setlogin.")
-        return
-
-    url = f"https://edu-api.21-school.ru/services/21-school/api/v1/users/{login}/projects"
-    headers = {"Authorization": API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        projects = response.json().get("projects", [])
-        if not projects:
-            await update.message.reply_text("Проекты не найдены.")
-            return
-        project_list = "\n".join(p.get("title", "Без названия") for p in projects)
-        await update.message.reply_text(f"Ваши проекты:\n{project_list}")
-    else:
-        await update.message.reply_text("Не удалось получить проекты.")
-
-# Получение навыков
-async def myskills(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    login = user_logins.get(update.effective_user.id)
-    if not login:
-        await update.message.reply_text("Сначала установите логин через /setlogin.")
-        return
-
-    url = f"https://edu-api.21-school.ru/services/21-school/api/v1/users/{login}/skills"
-    headers = {"Authorization": API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        skills = response.json().get("skills", [])
-        if not skills:
-            await update.message.reply_text("Навыки не найдены.")
-            return
-        skills_list = "\n".join(f"{skill['name']}: {skill['points']}" for skill in skills)
-        await update.message.reply_text(f"Ваши навыки:\n{skills_list}")
-    else:
-        await update.message.reply_text("Не удалось получить навыки.")
-
-# Логирование времени — пока заглушка
-async def logtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Эта функция пока в разработке.")
-
-# Друзья в кампусе — пока заглушка
 async def addfriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Функция добавления друзей пока в разработке.")
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    if not context.args:
+        await update.message.reply_text("Использование: /addfriend <login>")
+        return
+    friend = context.args[0]
+    if friend in udata['friends']:
+        await update.message.reply_text(f"{friend} уже в списке друзей.")
+    else:
+        udata['friends'].append(friend)
+        await update.message.reply_text(f"Добавлен друг: {friend}")
 
 async def removefriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Функция удаления друзей пока в разработке.")
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    if not context.args:
+        await update.message.reply_text("Использование: /removefriend <login>")
+        return
+    friend = context.args[0]
+    if friend in udata['friends']:
+        udata['friends'].remove(friend)
+        await update.message.reply_text(f"Удалён друг: {friend}")
+    else:
+        await update.message.reply_text(f"{friend} нет в списке друзей.")
 
 async def listfriends(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Функция списка друзей пока в разработке.")
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    if not udata['friends']:
+        await update.message.reply_text("Список друзей пуст.")
+    else:
+        await update.message.reply_text("Ваши друзья:\n" + "\n".join(udata['friends']))
 
 async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Функция проверки всех друзей пока в разработке.")
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    if not udata['friends']:
+        await update.message.reply_text("Список друзей пуст. Добавьте через /addfriend.")
+        return
+    lines = []
+    for friend in udata['friends']:
+        resp, err = api_get(udata, f"/participants/{friend}/workstation")
+        if resp and resp.status_code == 200:
+            d = resp.json()
+            lines.append(f"{friend}: кластер {d['clusterName']}, ряд {d['row']}, место {d['number']}")
+        else:
+            lines.append(f"{friend}: не в кампусе.")
+    await update.message.reply_text("\n".join(lines))
+
+async def myxp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    resp, _ = api_get(udata, f"/participants/{udata['login']}/experience-history")
+    if resp and resp.status_code == 200:
+        total = sum(item.get('expValue', 0) for item in resp.json().get('expHistory', []))
+        await update.message.reply_text(f"Ваш суммарный XP: {total}")
+    else:
+        await update.message.reply_text("Ошибка получения XP.")
+
+async def mylevel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    resp, _ = api_get(udata, f"/participants/{udata['login']}")
+    if resp and resp.status_code == 200:
+        lvl = resp.json().get('level', 'неизвестно')
+        await update.message.reply_text(f"Ваш уровень: {lvl}")
+    else:
+        await update.message.reply_text("Ошибка получения уровня.")
+
+async def myprojects(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    resp, _ = api_get(udata, f"/participants/{udata['login']}/projects")
+    if resp and resp.status_code == 200:
+        projs = resp.json().get('projects', [])
+        if not projs:
+            await update.message.reply_text("Проекты не найдены.")
+        else:
+            await update.message.reply_text("Проекты:\n" + "\n".join(p['title'] for p in projs))
+    else:
+        await update.message.reply_text("Ошибка получения проектов.")
+
+async def myskills(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    resp, _ = api_get(udata, f"/participants/{udata['login']}/skills")
+    if resp and resp.status_code == 200:
+        skills = resp.json().get('skills', [])
+        if not skills:
+            await update.message.reply_text("Навыки не найдены.")
+        else:
+            await update.message.reply_text("Навыки:\n" + "\n".join(f"{s['name']}: {s['points']}" for s in skills))
+    else:
+        await update.message.reply_text("Ошибка получения навыков.")
+
+async def mybadges(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    resp, _ = api_get(udata, f"/participants/{udata['login']}/badges")
+    if resp and resp.status_code == 200:
+        badges = resp.json().get('badges', [])
+        if not badges:
+            await update.message.reply_text("Значки не найдены.")
+        else:
+            await update.message.reply_text(
+                "Значки:\n" +
+                "\n".join(f"{b['name']} ({b['receiptDateTime']})" for b in badges)
+            )
+    else:
+        await update.message.reply_text("Ошибка получения значков.")
+
+async def logtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    udata = get_user_data(uid)
+    if not udata:
+        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+        return
+    resp, _ = api_get(udata, f"/participants/{udata['login']}/logtime")
+    if resp and resp.status_code == 200:
+        await update.message.reply_text(f"Среднее время в кампусе за неделю: {resp.json()} ч.")
+    else:
+        await update.message.reply_text("Ошибка получения logtime.")
