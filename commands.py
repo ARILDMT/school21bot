@@ -6,32 +6,30 @@ from school21_api import authenticate, api_get
 # in-memory хранилище
 users_data = {}
 
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ContextTypes
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "Привет!\n\n"
-        "Этот бот был разработан для студентов Школы 21, чтобы отслеживать XP, друзей в кампусе и прогресс по проектам.\n\n"
-        "Авторы:\n"
+        "👋 *Добро пожаловать в бот Школы 21!*\n\n"
+        "Этот бот помогает:\n"
+        "• Отслеживать XP\n"
+        "• Следить за друзьями в кампусе\n"
+        "• Контролировать прогресс по проектам\n\n"
+        "*Авторы:*\n"
         "Дима — TG: @OdintD | sh21: whirlpon\n"
-        "Арси — TG: @arildmt | sh21: fernaani\n"
-        "1. Каждый пользователь вводит `/auth <login> <password>`."
-        "2. Бот сохраняет токены и дальше все команды (`/check [login]`, `/myxp`, и т. д.) работают автоматически."  
-        "3. При истечении `access_token` бот обновит его по `refresh_token` без вмешательства."  
-        "Если что–то подправить — дай знать! Успехов в кодинге. 🚀"
-        "| Команда | Описание |"
-        "| `/start` | Приветствие и меню |"
-        "| `/auth <login> <password>` | Авторизация в API Школы 21 |"
-        "| `/check [login]` | Проверка местоположения в кампусе (своего или другого) |"
-        "| `/checkall` | Проверка всех друзей |"
-        "| `/addfriend <login>` | Добавить друга |"
-        "| `/removefriend <login>` | Удалить друга |"
-        "| `/listfriends` | Показать список друзей |"
-        "| `/myxp` | Показать суммарный XP |"
-        "| `/mylevel` | Показать текущий уровень |"
-        "| `/myprojects` | Показать список проектов |"
-        "| `/myskills` | Показать навыки и очки |"
-        "| `/mybadges` | Показать полученные значки |"
-        "| `/logtime` | Показать среднее время в кампусе |"
+        "Арси — TG: @arildmt | sh21: fernaani\n\n"
+        "*Как начать:*\n"
+        "1. Введите `/auth <login> <password>` для авторизации\n"
+        "2. Бот сохранит токены и обработает команды автоматически:\n"
+        "   `/check [login]`, `/myxp`, `/mylevel` и другие\n"
+        "3. При истечении токена `access_token` он обновится по `refresh_token`\n\n"
+        "▶ *Доступные команды:*\n"
+        "/start, /auth, /check, /checkall, /addfriend, /removefriend, /listfriends,\n"
+        "/myxp, /mylevel, /myprojects, /myskills, /mybadges, /logtime\n\n"
+        "Успехов в кодинге! 🚀"
     )
+
     keyboard = [
         ["/auth", "/check", "/checkall"],
         ["/myxp", "/mylevel"],
@@ -39,7 +37,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["/logtime", "/addfriend", "/removefriend", "/listfriends"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(text, reply_markup=reply_markup)
+
+    await update.message.reply_text(
+        text,
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
 
 async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) != 2:
