@@ -107,7 +107,7 @@ async def myprojects(update: Update, context: ContextTypes.DEFAULT_TYPE):
     login = user_logins.get(update.effective_user.id)
     if not login:
         await update.message.reply_text("Сначала установите логин через /setlogin.")
-return
+        return
 
     url = f"https://edu-api.21-school.ru/services/21-school/api/v1/users/{login}/projects"
     headers = {"Authorization": API_TOKEN}
