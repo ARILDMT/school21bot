@@ -2,16 +2,16 @@ import os
 from telegram.ext import ApplicationBuilder, CommandHandler
 from commands import (
     start, setlogin, check, myxp, mylevel, myprojects,
-    mybadges, myskills, logtime, addfriend, removefriend,
-    listfriends, checkall
+    mybadges, myskills, logtime
 )
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-PORT = int(os.environ.get('PORT', 8080))  # Render использует переменную PORT
+PORT = int(os.environ.get('PORT', 8080))  # Порт для Render
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # Хендлеры
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setlogin", setlogin))
     app.add_handler(CommandHandler("check", check))
@@ -21,11 +21,8 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("mybadges", mybadges))
     app.add_handler(CommandHandler("myskills", myskills))
     app.add_handler(CommandHandler("logtime", logtime))
-    app.add_handler(CommandHandler("addfriend", addfriend))
-    app.add_handler(CommandHandler("removefriend", removefriend))
-    app.add_handler(CommandHandler("listfriends", listfriends))
-    app.add_handler(CommandHandler("checkall", checkall))
 
+    # Запуск через webhook
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
