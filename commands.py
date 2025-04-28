@@ -1,239 +1,193 @@
-import logging
+import random
+import string
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
-from school21_api import authenticate, api_get
+from db import (
+    add_user, get_user_by_telegram_id, update_registration_status,
+    find_by_school21_login, add_friend, remove_friend, list_friends
+)
+from rocket_chat import send_verification_code
+from school21_api import (
+    get_user_location, get_my_xp, get_my_level,
+    get_my_projects, get_my_skills, get_my_badges,
+    get_average_logtime
+)
 
-# in-memory хранилище
-users_data = {}
+# Генерация случайного кода
+def generate_code(length=6):
+    return ''.join(random.choices(string.digits, k=length))
 
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ContextTypes
-
+# Старт
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "👋 *Добро пожаловать в бот Школы 21!*\n\n"
-        "Этот бот помогает:\n"
-        "• Отслеживать XP\n"
-        "• Следить за друзьями в кампусе\n"
-        "• Контролировать прогресс по проектам\n\n"
-        "*Авторы:*\n"
+        "Привет!\n\n"
+        "Этот бот был разработан для студентов Школы 21, чтобы отслеживать XP, друзей в кампусе и прогресс по проектам.\n\n"
+        "Авторы:\n"
         "Дима — TG: @OdintD | sh21: whirlpon\n"
         "Арси — TG: @arildmt | sh21: fernaani\n\n"
-        "*Как начать:*\n"
-        "1. Введите `/auth <login> <password>` для авторизации\n"
-        "2. Бот сохранит токены и обработает команды автоматически:\n"
-        "   `/check [login]`, `/myxp`, `/mylevel` и другие\n"
-        "3. При истечении токена `access_token` он обновится по `refresh_token`\n\n"
-        "▶ *Доступные команды:*\n"
-        "/start, /auth, /check, /checkall, /addfriend, /removefriend, /listfriends,\n"
-        "/myxp, /mylevel, /myprojects, /myskills, /mybadges, /logtime\n\n"
-        "Успехов в кодинге! 🚀"
+        "Команды:\n"
+        "/register <school21_login> — регистрация\n"
+        "/confirm <код> — подтвердить код\n"
+        "/check [login] — где пир\n"
+        "/checkall — где все друзья\n"
+        "/myxp — мой XP\n"
+        "/mylevel — мой уровень\n"
+        "/myprojects — мои проекты\n"
+        "/myskills — мои навыки\n"
+        "/mybadges — мои значки\n"
+        "/logtime — среднее время\n"
+        "/addfriend <login> — добавить друга\n"
+        "/removefriend <login> — удалить друга\n"
+        "/listfriends — список друзей"
     )
-
     keyboard = [
-        ["/auth", "/check", "/checkall"],
-        ["/myxp", "/mylevel"],
-        ["/myprojects", "/myskills", "/mybadges"],
-        ["/logtime", "/addfriend", "/removefriend", "/listfriends"]
+        ["/register", "/confirm", "/check", "/checkall"],
+        ["/myxp", "/mylevel", "/myprojects", "/myskills"],
+        ["/mybadges", "/logtime"],
+        ["/addfriend", "/removefriend", "/listfriends"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(text, reply_markup=reply_markup)
 
-    await update.message.reply_text(
-        text,
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
+# Регистрация
+async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    username = update.effective_user.username
+    args = context.args
 
-async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 2:
-        await update.message.reply_text("Использование: /auth <login> <password>")
+    if not args:
+        await update.message.reply_text("Укажите логин Школы 21: /register fernaani")
         return
-    login, password = context.args
-    at, rt, exp = authenticate(login, password)
-    if at is None:
-        await update.message.reply_text("Неверный логин или пароль. Попробуйте снова.")
-        return
-    uid = update.effective_user.id
-    users_data[uid] = {
-        'login': login,
-        'access_token': at,
-        'refresh_token': rt,
-        'expires_at': exp,
-        'friends': []
-    }
-    await update.message.reply_text(f"Успешно авторизованы как {login}.")
 
-def get_user_data(uid):
-    return users_data.get(uid)
+    school21_login = args[0]
+    user = get_user_by_telegram_id(telegram_id)
 
-async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth <login> <password>.")
+    if user:
+        await update.message.reply_text("Вы уже зарегистрированы или ожидаете подтверждения.")
         return
-    target = context.args[0] if context.args else udata['login']
-    resp, err = api_get(udata, f"/participants/{target}/workstation")
-    if err == 'auth_error' or resp is None:
-        await update.message.reply_text("Ошибка авторизации, введите /auth заново.")
-        return
-    if resp.status_code == 200:
-        d = resp.json()
+
+    code = generate_code()
+    sent = send_verification_code(username, code)
+
+    if sent:
+        add_user(telegram_id, username, code, school21_login)
         await update.message.reply_text(
-            f"{target}: кластер {d['clusterName']}, ряд {d['row']}, место {d['number']}"
+            "Код подтверждения отправлен в Rocket.Chat!\n"
+            "Введите его через /confirm <код>."
         )
-    elif resp.status_code == 404:
-        await update.message.reply_text(f"{target}: не в кампусе.")
     else:
-        await update.message.reply_text("Ошибка получения данных.")
+        await update.message.reply_text("Ошибка отправки кода. Попробуйте позже.")
 
-async def addfriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+# Подтверждение
+async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    args = context.args
+
+    if not args:
+        await update.message.reply_text("Укажите код подтверждения: /confirm 123456")
         return
-    if not context.args:
-        await update.message.reply_text("Использование: /addfriend <login>")
+
+    code = args[0]
+    user = get_user_by_telegram_id(telegram_id)
+
+    if not user:
+        await update.message.reply_text("Вы не зарегистрированы. Используйте /register.")
         return
-    friend = context.args[0]
-    if friend in udata['friends']:
-        await update.message.reply_text(f"{friend} уже в списке друзей.")
+
+    if user[4] == code:
+        update_registration_status(telegram_id)
+        await update.message.reply_text("Регистрация подтверждена! Теперь доступны команды.")
     else:
-        udata['friends'].append(friend)
-        await update.message.reply_text(f"Добавлен друг: {friend}")
+        await update.message.reply_text("Неверный код подтверждения.")
 
-async def removefriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
-        return
-    if not context.args:
-        await update.message.reply_text("Использование: /removefriend <login>")
-        return
-    friend = context.args[0]
-    if friend in udata['friends']:
-        udata['friends'].remove(friend)
-        await update.message.reply_text(f"Удалён друг: {friend}")
-    else:
-        await update.message.reply_text(f"{friend} нет в списке друзей.")
+# Проверка локации
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    login = args[0] if args else None
+    if not login:
+        user = get_user_by_telegram_id(update.effective_user.id)
+        if not user:
+            await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
+            return
+        login = user[5]
 
-async def listfriends(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
-        return
-    if not udata['friends']:
-        await update.message.reply_text("Список друзей пуст.")
-    else:
-        await update.message.reply_text("Ваши друзья:\n" + "\n".join(udata['friends']))
+    location = get_user_location(login)
+    await update.message.reply_text(location)
 
+# Проверка всех друзей
 async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
-        return
-    if not udata['friends']:
-        await update.message.reply_text("Список друзей пуст. Добавьте через /addfriend.")
-        return
-    lines = []
-    for friend in udata['friends']:
-        resp, err = api_get(udata, f"/participants/{friend}/workstation")
-        if resp and resp.status_code == 200:
-            d = resp.json()
-            lines.append(f"{friend}: кластер {d['clusterName']}, ряд {d['row']}, место {d['number']}")
-        else:
-            lines.append(f"{friend}: не в кампусе.")
-    await update.message.reply_text("\n".join(lines))
+    telegram_id = update.effective_user.id
+    friends = list_friends(telegram_id)
 
+    if not friends:
+        await update.message.reply_text("У вас нет добавленных друзей.")
+        return
+
+    results = []
+    for friend_login in friends:
+        location = get_user_location(friend_login)
+        results.append(f"{friend_login}: {location}")
+
+    await update.message.reply_text("\n".join(results))
+
+# Мой XP
 async def myxp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
-        return
-    resp, _ = api_get(udata, f"/participants/{udata['login']}/experience-history")
-    if resp and resp.status_code == 200:
-        total = sum(item.get('expValue', 0) for item in resp.json().get('expHistory', []))
-        await update.message.reply_text(f"Ваш суммарный XP: {total}")
-    else:
-        await update.message.reply_text("Ошибка получения XP.")
+    result = get_my_xp(update.effective_user.id)
+    await update.message.reply_text(result)
 
+# Мой уровень
 async def mylevel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
-        return
-    resp, _ = api_get(udata, f"/participants/{udata['login']}")
-    if resp and resp.status_code == 200:
-        lvl = resp.json().get('level', 'неизвестно')
-        await update.message.reply_text(f"Ваш уровень: {lvl}")
-    else:
-        await update.message.reply_text("Ошибка получения уровня.")
+    result = get_my_level(update.effective_user.id)
+    await update.message.reply_text(result)
 
+# Мои проекты
 async def myprojects(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
-        return
-    resp, _ = api_get(udata, f"/participants/{udata['login']}/projects")
-    if resp and resp.status_code == 200:
-        projs = resp.json().get('projects', [])
-        if not projs:
-            await update.message.reply_text("Проекты не найдены.")
-        else:
-            await update.message.reply_text("Проекты:\n" + "\n".join(p['title'] for p in projs))
-    else:
-        await update.message.reply_text("Ошибка получения проектов.")
+    result = get_my_projects(update.effective_user.id)
+    await update.message.reply_text(result)
 
+# Мои навыки
 async def myskills(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
-        return
-    resp, _ = api_get(udata, f"/participants/{udata['login']}/skills")
-    if resp and resp.status_code == 200:
-        skills = resp.json().get('skills', [])
-        if not skills:
-            await update.message.reply_text("Навыки не найдены.")
-        else:
-            await update.message.reply_text("Навыки:\n" + "\n".join(f"{s['name']}: {s['points']}" for s in skills))
-    else:
-        await update.message.reply_text("Ошибка получения навыков.")
+    result = get_my_skills(update.effective_user.id)
+    await update.message.reply_text(result)
 
+# Мои значки
 async def mybadges(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
-        return
-    resp, _ = api_get(udata, f"/participants/{udata['login']}/badges")
-    if resp and resp.status_code == 200:
-        badges = resp.json().get('badges', [])
-        if not badges:
-            await update.message.reply_text("Значки не найдены.")
-        else:
-            await update.message.reply_text(
-                "Значки:\n" +
-                "\n".join(f"{b['name']} ({b['receiptDateTime']})" for b in badges)
-            )
-    else:
-        await update.message.reply_text("Ошибка получения значков.")
+    result = get_my_badges(update.effective_user.id)
+    await update.message.reply_text(result)
 
+# Мой логтайм
 async def logtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    udata = get_user_data(uid)
-    if not udata:
-        await update.message.reply_text("Сначала авторизуйтесь через /auth.")
+    result = get_average_logtime(update.effective_user.id)
+    await update.message.reply_text(result)
+
+# Добавить друга
+async def addfriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    args = context.args
+    if not args:
+        await update.message.reply_text("Укажите логин друга: /addfriend fernaani")
         return
-    resp, _ = api_get(udata, f"/participants/{udata['login']}/logtime")
-    if resp and resp.status_code == 200:
-        await update.message.reply_text(f"Среднее время в кампусе за неделю: {resp.json()} ч.")
+    friend_login = args[0]
+    add_friend(telegram_id, friend_login)
+    await update.message.reply_text(f"Друг {friend_login} добавлен!")
+
+# Удалить друга
+async def removefriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    args = context.args
+    if not args:
+        await update.message.reply_text("Укажите логин друга: /removefriend fernaani")
+        return
+    friend_login = args[0]
+    remove_friend(telegram_id, friend_login)
+    await update.message.reply_text(f"Друг {friend_login} удалён.")
+
+# Список друзей
+async def listfriends(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    friends = list_friends(telegram_id)
+
+    if not friends:
+        await update.message.reply_text("У вас нет добавленных друзей.")
     else:
-        await update.message.reply_text("Ошибка получения logtime.")
+        await update.message.reply_text("Ваши друзья:\n" + "\n".join(friends))
