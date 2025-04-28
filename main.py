@@ -1,41 +1,36 @@
 import os
 from telegram.ext import ApplicationBuilder, CommandHandler
 from commands import (
-    start, auth, check, checkall, myxp, mylevel, myprojects, myskills,
-    mybadges, logtime, addfriend, removefriend, listfriends
+    start, auth, confirm, check, checkall, addfriend, removefriend, listfriends,
+    setreview, listreviews, removereview,
+    myxp, mylevel, myprojects, myskills, mybadges, logtime
 )
 from scheduler import start_scheduler
+from db import init_db
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-PORT = int(os.environ.get('PORT', 8080))  # Порт для Render
-
-commands = {
-    "start": start,
-    "auth": auth,
-    "check": check,
-    "checkall": checkall,
-    "myxp": myxp,
-    "mylevel": mylevel,
-    "myprojects": myprojects,
-    "myskills": myskills,
-    "mybadges": mybadges,
-    "logtime": logtime,
-    "addfriend": addfriend,
-    "removefriend": removefriend,
-    "listfriends": listfriends
-}
+PORT      = int(os.getenv("PORT", 8080))
+HOSTNAME  = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 
 if __name__ == '__main__':
+    init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    for cmd, fn in commands.items():
-        app.add_handler(CommandHandler(cmd, fn))
+    cmds = {
+      "start": start, "auth": auth, "confirm": confirm,
+      "check": check, "checkall": checkall,
+      "addfriend": addfriend, "removefriend": removefriend, "listfriends": listfriends,
+      "setreview": setreview, "listreviews": listreviews, "removereview": removereview,
+      "myxp": myxp, "mylevel": mylevel, "myprojects": myprojects,
+      "myskills": myskills, "mybadges": mybadges, "logtime": logtime
+    }
+    for name, fn in cmds.items():
+        app.add_handler(CommandHandler(name, fn))
 
-    start_scheduler(app)  # Запустить планировщик уведомлений
+    start_scheduler(app)
 
-    # Запуск через webhook для Render
     app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/"
+      listen="0.0.0.0",
+      port=PORT,
+      webhook_url=f"https://{HOSTNAME}/"
     )
