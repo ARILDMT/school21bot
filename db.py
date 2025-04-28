@@ -1,114 +1,128 @@
-import os
 import sqlite3
-from threading import Lock
+import os
 
-DB_PATH = os.getenv("DATABASE_URL", "bot.db")
-_lock = Lock()
+DB_PATH = os.getenv("DB_PATH", "bot.db")
 
-def _get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Пользователи
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users(
+      telegram_id   INTEGER PRIMARY KEY,
+      school_login  TEXT,
+      rocket_code   TEXT
+    )""")
+    # Друзья + статус (“present”/“absent”)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS friends(
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      telegram_id   INTEGER,
+      friend_login  TEXT,
+      last_status   TEXT,
+      FOREIGN KEY(telegram_id) REFERENCES users(telegram_id)
+    )""")
+    # Peer-review события
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS peer_review(
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      telegram_id   INTEGER,
+      peer_login    TEXT,
+      review_date   TEXT,
+      FOREIGN KEY(telegram_id) REFERENCES users(telegram_id)
+    )""")
+    conn.commit()
+    conn.close()
 
-def create_tables():
-    with _lock, _get_conn() as conn:
-        c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                telegram_id    INTEGER PRIMARY KEY,
-                username       TEXT,
-                confirmation_code TEXT,
-                login          TEXT,
-                registered     INTEGER DEFAULT 0
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS friends (
-                telegram_id    INTEGER,
-                friend_login   TEXT,
-                PRIMARY KEY(telegram_id, friend_login)
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS friend_status (
-                telegram_id    INTEGER,
-                friend_login   TEXT,
-                in_campus      INTEGER DEFAULT 0,
-                PRIMARY KEY(telegram_id, friend_login)
-            )
-        """)
-        conn.commit()
+# ——— Пользователь —————————————————————————————————————
+def set_user_login(telegram_id, login):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO users(telegram_id) VALUES(?)", (telegram_id,))
+    c.execute("UPDATE users SET school_login=? WHERE telegram_id=?", (login, telegram_id))
+    conn.commit(); conn.close()
 
-def add_user(tg_id, username, code, login):
-    with _lock, _get_conn() as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO users
-            (telegram_id, username, confirmation_code, login, registered)
-            VALUES (?, ?, ?, ?, 0)
-        """, (tg_id, username, code, login))
-        conn.commit()
+def get_user_login(telegram_id):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT school_login FROM users WHERE telegram_id=?", (telegram_id,))
+    row = c.fetchone(); conn.close()
+    return row[0] if row else None
 
-def get_user_by_telegram_id(tg_id):
-    with _lock, _get_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE telegram_id = ?", (tg_id,)).fetchone()
-        return row
+# ——— Верификация через Rocket.Chat ————————————————————
+def set_pending_code(telegram_id, code):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("UPDATE users SET rocket_code=? WHERE telegram_id=?", (str(code), telegram_id))
+    conn.commit(); conn.close()
 
-def update_registration_status(tg_id):
-    with _lock, _get_conn() as conn:
-        conn.execute("UPDATE users SET registered = 1 WHERE telegram_id = ?", (tg_id,))
-        conn.commit()
+def get_pending_code(telegram_id):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT rocket_code FROM users WHERE telegram_id=?", (telegram_id,))
+    row = c.fetchone(); conn.close()
+    return row[0] if row and row[0] else None
 
-def add_friend(tg_id, friend_login):
-    with _lock, _get_conn() as conn:
-        conn.execute("""
-            INSERT OR IGNORE INTO friends (telegram_id, friend_login)
-            VALUES (?, ?)
-        """, (tg_id, friend_login))
-        conn.commit()
+def clear_pending_code(telegram_id):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("UPDATE users SET rocket_code=NULL WHERE telegram_id=?", (telegram_id,))
+    conn.commit(); conn.close()
 
-def remove_friend(tg_id, friend_login):
-    with _lock, _get_conn() as conn:
-        conn.execute("""
-            DELETE FROM friends
-            WHERE telegram_id = ? AND friend_login = ?
-        """, (tg_id, friend_login))
-        conn.commit()
-        # also cleanup status
-        conn.execute("""
-            DELETE FROM friend_status
-            WHERE telegram_id = ? AND friend_login = ?
-        """, (tg_id, friend_login))
-        conn.commit()
+# ——— Друзья ————————————————————————————————————————
+def add_friend(telegram_id, friend_login):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("INSERT INTO friends(telegram_id,friend_login) VALUES(?,?)",
+              (telegram_id, friend_login))
+    conn.commit(); conn.close()
 
-def list_friends(tg_id):
-    with _lock, _get_conn() as conn:
-        rows = conn.execute("""
-            SELECT friend_login FROM friends
-            WHERE telegram_id = ?
-        """, (tg_id,)).fetchall()
-        return [r["friend_login"] for r in rows]
+def remove_friend(telegram_id, friend_login):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("DELETE FROM friends WHERE telegram_id=? AND friend_login=?",
+              (telegram_id, friend_login))
+    conn.commit(); conn.close()
 
+def get_friends(telegram_id):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT friend_login FROM friends WHERE telegram_id=?", (telegram_id,))
+    rows = c.fetchall(); conn.close()
+    return [r[0] for r in rows]
+
+def get_friends_with_status(telegram_id):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT id, friend_login, last_status FROM friends WHERE telegram_id=?",
+              (telegram_id,))
+    rows = c.fetchall(); conn.close()
+    return [{"id":r[0],"login":r[1],"last":r[2]} for r in rows]
+
+def update_friend_status(friend_id, status):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("UPDATE friends SET last_status=? WHERE id=?", (status, friend_id))
+    conn.commit(); conn.close()
+
+# ——— Peer-review —————————————————————————————————————
+def add_peer_review(telegram_id, peer_login, review_date):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("INSERT INTO peer_review(telegram_id,peer_login,review_date) VALUES(?,?,?)",
+              (telegram_id, peer_login, review_date))
+    conn.commit(); conn.close()
+
+def get_peer_reviews(telegram_id):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT id, peer_login, review_date FROM peer_review WHERE telegram_id=?",
+              (telegram_id,))
+    rows = c.fetchall(); conn.close()
+    return [{"id":r[0],"login":r[1],"date":r[2]} for r in rows]
+
+def remove_peer_review(event_id):
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("DELETE FROM peer_review WHERE id=?", (event_id,))
+    conn.commit(); conn.close()
+
+# ——— Утилиты общего доступа ——————————————————————————
 def get_all_users():
-    with _lock, _get_conn() as conn:
-        rows = conn.execute("""
-            SELECT telegram_id FROM users
-            WHERE registered = 1
-        """).fetchall()
-        return [r["telegram_id"] for r in rows]
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT telegram_id FROM users WHERE school_login IS NOT NULL")
+    rows = c.fetchall(); conn.close()
+    return [r[0] for r in rows]
 
-def get_friend_status(tg_id, friend_login):
-    with _lock, _get_conn() as conn:
-        row = conn.execute("""
-            SELECT in_campus FROM friend_status
-            WHERE telegram_id = ? AND friend_login = ?
-        """, (tg_id, friend_login)).fetchone()
-        return row["in_campus"] if row else 0
-
-def set_friend_status(tg_id, friend_login, in_campus):
-    with _lock, _get_conn() as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO friend_status
-            (telegram_id, friend_login, in_campus)
-            VALUES (?, ?, ?)
-        """, (tg_id, friend_login, in_campus))
-        conn.commit()
+def get_all_peer_reviews():
+    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("SELECT telegram_id,peer_login,review_date FROM peer_review")
+    rows = c.fetchall(); conn.close()
+    return [{"telegram_id":r[0],"login":r[1],"date":r[2]} for r in rows]
