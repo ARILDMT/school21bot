@@ -1,129 +1,74 @@
-import os
-import requests
+import os, time, requests, threading
 
-SCHOOL21_API_TOKEN = os.getenv("SCHOOL21_API_TOKEN")
-API_BASE_URL = "https://edu-api.21-school.ru/services/21-school/api/v1"
+_lock = threading.Lock()
+_tokens = {"access":None, "refresh":None, "expiry":0}
 
-HEADERS = {
-    "Authorization": SCHOOL21_API_TOKEN
-}
+AUTH_URL = os.getenv("SCHOOL21_AUTH_URL")
+API_URL  = os.getenv("SCHOOL21_API_URL").rstrip("/")
 
-def get_user_location(login):
-    try:
-        url = f"{API_BASE_URL}/users/{login}/location"
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                return f"{login} находится в кластере {data['clusterName']} (ряд {data['row']}, место {data['number']})."
-            else:
-                return f"{login} не в кампусе."
-        else:
-            return f"Ошибка при проверке локации: {response.status_code}"
-    except Exception as e:
-        return f"Ошибка: {e}"
+def _get_token():
+    with _lock:
+        now = time.time()
+        if _tokens["access"] and now < _tokens["expiry"] - 60:
+            return _tokens["access"]
+        payload = {
+            "client_id": "s21-open-api",
+            "username": os.getenv("SCHOOL21_LOGIN"),
+            "password": os.getenv("SCHOOL21_PASSWORD"),
+            "grant_type": "password"
+        }
+        r = requests.post(AUTH_URL, data=payload)
+        r.raise_for_status()
+        data = r.json()
+        _tokens["access"]  = data["access_token"]
+        _tokens["refresh"] = data["refresh_token"]
+        _tokens["expiry"]  = now + data["expires_in"]
+        return _tokens["access"]
 
-def get_my_xp(telegram_id):
-    login = get_login_by_telegram_id(telegram_id)
-    if not login:
-        return "Вы не зарегистрированы."
-    try:
-        url = f"{API_BASE_URL}/users/{login}/xp"
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 200:
-            xp = response.json().get("xp", 0)
-            return f"Ваш суммарный XP: {xp}"
-        else:
-            return "Не удалось получить XP."
-    except Exception as e:
-        return f"Ошибка: {e}"
+def _refresh_token():
+    with _lock:
+        payload = {
+            "client_id": "s21-open-api",
+            "grant_type": "refresh_token",
+            "refresh_token": _tokens["refresh"]
+        }
+        r = requests.post(AUTH_URL, data=payload)
+        r.raise_for_status()
+        data = r.json()
+        _tokens["access"]  = data["access_token"]
+        _tokens["refresh"] = data["refresh_token"]
+        _tokens["expiry"]  = time.time() + data["expires_in"]
+        return _tokens["access"]
 
-def get_my_level(telegram_id):
-    login = get_login_by_telegram_id(telegram_id)
-    if not login:
-        return "Вы не зарегистрированы."
-    try:
-        url = f"{API_BASE_URL}/users/{login}/level"
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 200:
-            level = response.json().get("level", 0)
-            return f"Ваш текущий уровень: {level}"
-        else:
-            return "Не удалось получить уровень."
-    except Exception as e:
-        return f"Ошибка: {e}"
+def _api_get(path, params=None):
+    token = _get_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    r = requests.get(f"{API_URL}{path}", headers=headers, params=params)
+    if r.status_code == 401:
+        token = _refresh_token()
+        headers["Authorization"] = f"Bearer {token}"
+        r = requests.get(f"{API_URL}{path}", headers=headers, params=params)
+    r.raise_for_status()
+    return r.json()
 
-def get_my_projects(telegram_id):
-    login = get_login_by_telegram_id(telegram_id)
-    if not login:
-        return "Вы не зарегистрированы."
-    try:
-        url = f"{API_BASE_URL}/projects?userLogin={login}"
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 200:
-            projects = response.json().get("projects", [])
-            if not projects:
-                return "Проекты не найдены."
-            return "\n".join([f"{p['title']}: {p['status']}" for p in projects])
-        else:
-            return "Не удалось получить проекты."
-    except Exception as e:
-        return f"Ошибка: {e}"
+def fetch_user_workstation(login):
+    return _api_get(f"/v1/participants/{login}/workstation")
 
-def get_my_skills(telegram_id):
-    login = get_login_by_telegram_id(telegram_id)
-    if not login:
-        return "Вы не зарегистрированы."
-    try:
-        url = f"{API_BASE_URL}/skills?userLogin={login}"
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 200:
-            skills = response.json().get("skills", [])
-            if not skills:
-                return "Навыки не найдены."
-            return "\n".join([f"{s['name']}: {s['points']} очков" for s in skills])
-        else:
-            return "Не удалось получить навыки."
-    except Exception as e:
-        return f"Ошибка: {e}"
+def fetch_user_xp(login):
+    return _api_get(f"/v1/participants/{login}/points")
 
-def get_my_badges(telegram_id):
-    login = get_login_by_telegram_id(telegram_id)
-    if not login:
-        return "Вы не зарегистрированы."
-    try:
-        url = f"{API_BASE_URL}/badges?userLogin={login}"
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 200:
-            badges = response.json().get("badges", [])
-            if not badges:
-                return "Нет полученных значков."
-            return "\n".join([badge["name"] for badge in badges])
-        else:
-            return "Не удалось получить значки."
-    except Exception as e:
-        return f"Ошибка: {e}"
+def fetch_user_level(login):
+    u = _api_get(f"/v1/participants/{login}")
+    return {"level": u["level"], "exp": u["expValue"]}
 
-def get_average_logtime(telegram_id):
-    login = get_login_by_telegram_id(telegram_id)
-    if not login:
-        return "Вы не зарегистрированы."
-    try:
-        url = f"{API_BASE_URL}/logtime/average?userLogin={login}"
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 200:
-            hours = response.json().get("hours", 0)
-            return f"Ваше среднее время в кампусе: {hours} часов."
-        else:
-            return "Не удалось получить данные логтайма."
-    except Exception as e:
-        return f"Ошибка: {e}"
+def fetch_user_projects(login):
+    return _api_get(f"/v1/participants/{login}/projects")
 
-# Получение логина по Telegram ID (будет через db)
-from db import get_user_by_telegram_id
+def fetch_user_skills(login):
+    return _api_get(f"/v1/participants/{login}/skills")
 
-def get_login_by_telegram_id(telegram_id):
-    user = get_user_by_telegram_id(telegram_id)
-    if user:
-        return user[5]  # Индекс 5 — login в базе
-    return None
+def fetch_user_badges(login):
+    return _api_get(f"/v1/participants/{login}/badges")
+
+def fetch_user_logtime(login):
+    return _api_get(f"/v1/participants/{login}/logtime")
