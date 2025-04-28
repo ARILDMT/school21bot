@@ -1,38 +1,48 @@
 import os
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from db import create_tables
+from telegram.ext import ApplicationBuilder, CommandHandler
 from commands import (
     start, register, confirm,
-    check, checkall, myxp, mylevel, myprojects, myskills, mybadges, logtime,
+    check, checkall, myxp, mylevel,
+    myprojects, myskills, mybadges, logtime,
     addfriend, removefriend, listfriends
 )
+from db import create_tables
+from scheduler import start_scheduler
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-PORT = int(os.environ.get('PORT', 8080))
+PORT = int(os.environ.get("PORT", "8080"))
 
-# Обязательно создаём таблицы при старте
+# 1) Создать/проверить БД
 create_tables()
 
+# 2) Построить приложение
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# Регистрация команд
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("register", register))
-app.add_handler(CommandHandler("confirm", confirm))
-app.add_handler(CommandHandler("check", check))
-app.add_handler(CommandHandler("checkall", checkall))
-app.add_handler(CommandHandler("myxp", myxp))
-app.add_handler(CommandHandler("mylevel", mylevel))
-app.add_handler(CommandHandler("myprojects", myprojects))
-app.add_handler(CommandHandler("myskills", myskills))
-app.add_handler(CommandHandler("mybadges", mybadges))
-app.add_handler(CommandHandler("logtime", logtime))
-app.add_handler(CommandHandler("addfriend", addfriend))
-app.add_handler(CommandHandler("removefriend", removefriend))
-app.add_handler(CommandHandler("listfriends", listfriends))
+# 3) Зарегистрировать хендлеры
+handlers = [
+    ("/start", start),
+    ("/register", register),
+    ("/confirm", confirm),
+    ("/check", check),
+    ("/checkall", checkall),
+    ("/myxp", myxp),
+    ("/mylevel", mylevel),
+    ("/myprojects", myprojects),
+    ("/myskills", myskills),
+    ("/mybadges", mybadges),
+    ("/logtime", logtime),
+    ("/addfriend", addfriend),
+    ("/removefriend", removefriend),
+    ("/listfriends", listfriends),
+]
+for cmd, fn in handlers:
+    app.add_handler(CommandHandler(cmd, fn))
 
-# Запуск через Webhook для Render
+# 4) Запустить планировщик
+start_scheduler()
+
+# 5) Запустить Webhook
+print("✅ Бот запущен!")
 app.run_webhook(
     listen="0.0.0.0",
     port=PORT,
