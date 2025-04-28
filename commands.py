@@ -13,7 +13,7 @@ from rocket_chat import send_code_to_user
 SCHOOL_API_TOKEN = os.getenv("SCHOOL21_API_TOKEN")
 API_BASE_URL = "https://edu-api.21-school.ru/services/21-school/api/v1"
 
-# Старт /start
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "Привет!\n\n"
@@ -22,7 +22,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Дима — TG: @OdintD | sh21: whirlpon\n"
         "Арси — TG: @arildmt | sh21: fernaani\n\n"
         "Введите /register <логин> чтобы зарегистрироваться.\n\n"
-        "📋 Команды:\n"
+        "📋 Доступные команды:\n"
         "/register <логин> — Регистрация\n"
         "/confirm <код> — Подтверждение кода\n"
         "/check [логин] — Проверить пира\n"
@@ -46,220 +46,193 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(text, reply_markup=reply_markup)
 
-# Регистрация /register
+# /register
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Введите логин: /register <логин>")
         return
     login = context.args[0]
-    telegram_id = update.effective_user.id
+    tg_id = update.effective_user.id
     username = update.effective_user.username or "unknown"
-
     code = ''.join(random.choices(string.digits, k=6))
-    success = send_code_to_user(login, code)
-
-    if success:
-        add_user(telegram_id, username, code, login)
-        await update.message.reply_text("Код подтверждения отправлен через Rocket.Chat! Введите его командой /confirm <код>")
+    if send_code_to_user(login, code):
+        add_user(tg_id, username, code, login)
+        await update.message.reply_text(
+            "Код подтверждения отправлен через Rocket.Chat!\n"
+            "Введите его командой /confirm <код>"
+        )
     else:
         await update.message.reply_text("Не удалось отправить код через Rocket.Chat.")
 
-# Подтверждение /confirm
+# /confirm
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Введите код: /confirm <код>")
         return
-    entered_code = context.args[0]
+    entered = context.args[0]
     user = get_user_by_telegram_id(update.effective_user.id)
-
-    if user and user[3] == entered_code:
+    if user and user["confirmation_code"] == entered:
         update_registration_status(update.effective_user.id)
         await update.message.reply_text("Вы успешно зарегистрированы!")
     else:
-        await update.message.reply_text("Неверный код. Попробуйте снова.")
+        await update.message.reply_text("Неверный код, попробуйте снова.")
 
-# Команда /check [логин]
+# helper to get work station (cluster) info
+def _get_workstation(login):
+    url = f"{API_BASE_URL}/participants/{login}/workstation"
+    res = requests.get(url, headers={"Authorization": SCHOOL_API_TOKEN})
+    return res
+
+# /check
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     login = context.args[0] if context.args else None
     if not login:
         user = get_user_by_telegram_id(update.effective_user.id)
-        if not user or not user[5]:
+        if not user or user["registered"] == 0:
             await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
             return
-        login = user[5]
-
-    url = f"{API_BASE_URL}/clusters/peer/{login}"
-    headers = {"Authorization": SCHOOL_API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        data = response.json()
+        login = user["login"]
+    res = _get_workstation(login)
+    if res.status_code == 200:
+        data = res.json()
         await update.message.reply_text(
-            f"{login} находится в кампусе {data['clusterName']}, ряд {data['row']}, место {data['number']}."
+            f"{login} находится в кампусе {data['clusterName']}, "
+            f"ряд {data['row']}, место {data['number']}."
         )
     else:
-        await update.message.reply_text(f"Не удалось получить информацию о {login}.")
+        await update.message.reply_text(f"Информация о {login} не найдена.")
 
-# Команда /checkall
+# /checkall
 async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = get_user_by_telegram_id(update.effective_user.id)
-    if not user or user[4] == 0:
+    if not get_user_by_telegram_id(update.effective_user.id):
         await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
         return
-
     friends = list_friends(update.effective_user.id)
     if not friends:
-        await update.message.reply_text("У вас пока нет друзей. Добавьте через /addfriend <логин>.")
+        await update.message.reply_text("У вас нет друзей. Добавьте через /addfriend.")
         return
-
-    headers = {"Authorization": SCHOOL_API_TOKEN}
-    results = []
-    for login in friends:
-        url = f"{API_BASE_URL}/clusters/peer/{login}"
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            results.append(f"{login}: {data['clusterName']}, ряд {data['row']}, место {data['number']}")
+    out = []
+    for f in friends:
+        res = _get_workstation(f)
+        if res.status_code == 200:
+            d = res.json()
+            out.append(f"{f}: {d['clusterName']}, {d['row']}-{d['number']}")
         else:
-            results.append(f"{login}: Не найден")
+            out.append(f"{f}: не найден")
+    await update.message.reply_text("\n".join(out))
 
-    await update.message.reply_text("\n".join(results))
-
-# Команда /myxp
+# /myxp
 async def myxp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user_by_telegram_id(update.effective_user.id)
-    if not user:
+    if not user or user["registered"] == 0:
         await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
         return
-
-    login = user[5]
-    url = f"{API_BASE_URL}/peers/{login}/xp"
-    headers = {"Authorization": SCHOOL_API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        data = response.json()
-        total_xp = sum(item['amount'] for item in data)
-        await update.message.reply_text(f"Ваш суммарный XP: {total_xp}")
+    login = user["login"]
+    url = f"{API_BASE_URL}/participants/{login}/xp"
+    res = requests.get(url, headers={"Authorization": SCHOOL_API_TOKEN})
+    if res.status_code == 200:
+        total = sum(item["amount"] for item in res.json())
+        await update.message.reply_text(f"Ваш суммарный XP: {total}")
     else:
         await update.message.reply_text("Не удалось получить XP.")
 
-# Команда /mylevel
+# /mylevel
 async def mylevel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user_by_telegram_id(update.effective_user.id)
-    if not user:
+    if not user or user["registered"] == 0:
         await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
         return
-
-    login = user[5]
-    url = f"{API_BASE_URL}/peers/{login}"
-    headers = {"Authorization": SCHOOL_API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        data = response.json()
-        await update.message.reply_text(f"Ваш уровень: {data['level']:.2f}")
+    login = user["login"]
+    url = f"{API_BASE_URL}/participants/{login}"
+    res = requests.get(url, headers={"Authorization": SCHOOL_API_TOKEN})
+    if res.status_code == 200:
+        lvl = res.json().get("level")
+        await update.message.reply_text(f"Ваш уровень: {lvl}")
     else:
         await update.message.reply_text("Не удалось получить уровень.")
 
-# Команда /myprojects
+# /myprojects
 async def myprojects(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user_by_telegram_id(update.effective_user.id)
-    if not user:
+    if not user or user["registered"] == 0:
         await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
         return
-
-    login = user[5]
-    url = f"{API_BASE_URL}/peers/{login}/projects"
-    headers = {"Authorization": SCHOOL_API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        projects = response.json()
-        text = "\n".join([f"{p['title']} - {p['status']}" for p in projects])
-        await update.message.reply_text(text)
+    login = user["login"]
+    url = f"{API_BASE_URL}/participants/{login}/projects"
+    res = requests.get(url, headers={"Authorization": SCHOOL_API_TOKEN})
+    if res.status_code == 200:
+        text = "\n".join(f"{p['title']} — {p['status']}" for p in res.json())
+        await update.message.reply_text(text or "Проекты не найдены.")
     else:
         await update.message.reply_text("Не удалось получить проекты.")
 
-# Команда /myskills
+# /myskills
 async def myskills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user_by_telegram_id(update.effective_user.id)
-    if not user:
+    if not user or user["registered"] == 0:
         await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
         return
-
-    login = user[5]
-    url = f"{API_BASE_URL}/peers/{login}/skills"
-    headers = {"Authorization": SCHOOL_API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        skills = response.json()
-        text = "\n".join([f"{s['name']}: {s['points']}" for s in skills])
-        await update.message.reply_text(text)
+    login = user["login"]
+    url = f"{API_BASE_URL}/participants/{login}/skills"
+    res = requests.get(url, headers={"Authorization": SCHOOL_API_TOKEN})
+    if res.status_code == 200:
+        text = "\n".join(f"{s['name']}: {s['points']}" for s in res.json())
+        await update.message.reply_text(text or "Навыки не найдены.")
     else:
         await update.message.reply_text("Не удалось получить навыки.")
 
-# Команда /mybadges
+# /mybadges
 async def mybadges(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user_by_telegram_id(update.effective_user.id)
-    if not user:
+    if not user or user["registered"] == 0:
         await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
         return
-
-    login = user[5]
-    url = f"{API_BASE_URL}/peers/{login}/badges"
-    headers = {"Authorization": SCHOOL_API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        badges = response.json()
-        text = "\n".join([f"{b['name']}" for b in badges])
-        await update.message.reply_text(text)
+    login = user["login"]
+    url = f"{API_BASE_URL}/participants/{login}/badges"
+    res = requests.get(url, headers={"Authorization": SCHOOL_API_TOKEN})
+    if res.status_code == 200:
+        text = "\n".join(b["name"] for b in res.json())
+        await update.message.reply_text(text or "Значки не найдены.")
     else:
         await update.message.reply_text("Не удалось получить значки.")
 
-# Команда /logtime
+# /logtime
 async def logtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user_by_telegram_id(update.effective_user.id)
-    if not user:
+    if not user or user["registered"] == 0:
         await update.message.reply_text("Сначала зарегистрируйтесь через /register.")
         return
-
-    login = user[5]
-    url = f"{API_BASE_URL}/peers/{login}/locations-stats"
-    headers = {"Authorization": SCHOOL_API_TOKEN}
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        data = response.json()
-        average = data.get("averageTime")
-        await update.message.reply_text(f"Среднее время в кампусе: {average} минут в день.")
+    login = user["login"]
+    url = f"{API_BASE_URL}/participants/{login}/locations-stats"
+    res = requests.get(url, headers={"Authorization": SCHOOL_API_TOKEN})
+    if res.status_code == 200:
+        avg = res.json().get("averageTime")
+        await update.message.reply_text(f"Среднее время в кампусе: {avg} мин./день")
     else:
         await update.message.reply_text("Не удалось получить статистику.")
 
-# Добавить друга /addfriend
+# /addfriend
 async def addfriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Введите логин друга: /addfriend <логин>")
+        await update.message.reply_text("Введите логин: /addfriend <логин>")
         return
-    friend_login = context.args[0]
-    add_friend(update.effective_user.id, friend_login)
-    await update.message.reply_text(f"Друг {friend_login} добавлен!")
+    friend = context.args[0]
+    add_friend(update.effective_user.id, friend)
+    await update.message.reply_text(f"Друг {friend} добавлен!")
 
-# Удалить друга /removefriend
+# /removefriend
 async def removefriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Введите логин друга: /removefriend <логин>")
+        await update.message.reply_text("Введите логин: /removefriend <логин>")
         return
-    friend_login = context.args[0]
-    remove_friend(update.effective_user.id, friend_login)
-    await update.message.reply_text(f"Друг {friend_login} удалён.")
+    friend = context.args[0]
+    remove_friend(update.effective_user.id, friend)
+    await update.message.reply_text(f"Друг {friend} удалён.")
 
-# Список друзей /listfriends
+# /listfriends
 async def listfriends(update: Update, context: ContextTypes.DEFAULT_TYPE):
     friends = list_friends(update.effective_user.id)
-    if friends:
-        await update.message.reply_text("Ваши друзья:\n" + "\n".join(friends))
-    else:
-        await update.message.reply_text("У вас нет друзей.")
+    await update.message.reply_text(
+        "Ваши друзья:\n" + "\n".join(friends)
+        if friends else "У вас нет друзей."
+    )
