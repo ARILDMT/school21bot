@@ -1,74 +1,104 @@
-import os, time, requests, threading
-
-_lock = threading.Lock()
-_tokens = {"access":None, "refresh":None, "expiry":0}
+import os
+import time
+import requests
 
 AUTH_URL = os.getenv("SCHOOL21_AUTH_URL")
 API_URL  = os.getenv("SCHOOL21_API_URL").rstrip("/")
+CLIENT_ID = "s21-open-api"
 
-def _get_token():
-    with _lock:
-        now = time.time()
-        if _tokens["access"] and now < _tokens["expiry"] - 60:
-            return _tokens["access"]
-        payload = {
-            "client_id": "s21-open-api",
-            "username": os.getenv("SCHOOL21_LOGIN"),
-            "password": os.getenv("SCHOOL21_PASSWORD"),
+def authenticate(login: str, password: str) -> dict:
+    """Получить access + refresh токены по логину/паролю."""
+    resp = requests.post(
+        AUTH_URL,
+        headers={"Content-Type":"application/x-www-form-urlencoded"},
+        data={
+            "client_id": CLIENT_ID,
+            "username": login,
+            "password": password,
             "grant_type": "password"
-        }
-        r = requests.post(AUTH_URL, data=payload)
-        r.raise_for_status()
-        data = r.json()
-        _tokens["access"]  = data["access_token"]
-        _tokens["refresh"] = data["refresh_token"]
-        _tokens["expiry"]  = now + data["expires_in"]
-        return _tokens["access"]
+        },
+        timeout=10
+    )
+    resp.raise_for_status()
+    tokens = resp.json()
+    tokens['timestamp'] = time.time()
+    return tokens
 
-def _refresh_token():
-    with _lock:
-        payload = {
-            "client_id": "s21-open-api",
+def refresh_token(refresh_token: str) -> dict:
+    """Обновить access_token с помощью refresh_token."""
+    resp = requests.post(
+        AUTH_URL,
+        headers={"Content-Type":"application/x-www-form-urlencoded"},
+        data={
+            "client_id": CLIENT_ID,
             "grant_type": "refresh_token",
-            "refresh_token": _tokens["refresh"]
-        }
-        r = requests.post(AUTH_URL, data=payload)
-        r.raise_for_status()
-        data = r.json()
-        _tokens["access"]  = data["access_token"]
-        _tokens["refresh"] = data["refresh_token"]
-        _tokens["expiry"]  = time.time() + data["expires_in"]
-        return _tokens["access"]
+            "refresh_token": refresh_token
+        },
+        timeout=10
+    )
+    resp.raise_for_status()
+    tokens = resp.json()
+    tokens['timestamp'] = time.time()
+    return tokens
 
-def _api_get(path, params=None):
-    token = _get_token()
-    headers = {"Authorization": f"Bearer {token}"}
-    r = requests.get(f"{API_URL}{path}", headers=headers, params=params)
-    if r.status_code == 401:
-        token = _refresh_token()
-        headers["Authorization"] = f"Bearer {token}"
-        r = requests.get(f"{API_URL}{path}", headers=headers, params=params)
+def _ensure_tokens(user: dict) -> dict:
+    """Проверить время жизни токена, при надобности обновить."""
+    tokens = user['tokens']
+    # обновлять за минуту до истечения
+    if time.time() - tokens['timestamp'] > tokens['expires_in'] - 60:
+        new = refresh_token(tokens['refresh_token'])
+        user['tokens'] = new
+        return new
+    return tokens
+
+def _headers(tokens: dict) -> dict:
+    return {"Authorization": f"Bearer {tokens['access_token']}"}
+
+def get_workstation(login: str, user: dict) -> dict:
+    tokens = _ensure_tokens(user)
+    h = _headers(tokens)
+    r = requests.get(f"{API_URL}/v1/participants/{login}/workstation", headers=h, timeout=10)
     r.raise_for_status()
     return r.json()
 
-def fetch_user_workstation(login):
-    return _api_get(f"/v1/participants/{login}/workstation")
+def get_points(login: str, user: dict) -> dict:
+    tokens = _ensure_tokens(user)
+    h = _headers(tokens)
+    r = requests.get(f"{API_URL}/v1/participants/{login}/points", headers=h, timeout=10)
+    r.raise_for_status()
+    return r.json()
 
-def fetch_user_xp(login):
-    return _api_get(f"/v1/participants/{login}/points")
+def get_participant(login: str, user: dict) -> dict:
+    tokens = _ensure_tokens(user)
+    h = _headers(tokens)
+    r = requests.get(f"{API_URL}/v1/participants/{login}", headers=h, timeout=10)
+    r.raise_for_status()
+    return r.json()
 
-def fetch_user_level(login):
-    u = _api_get(f"/v1/participants/{login}")
-    return {"level": u["level"], "exp": u["expValue"]}
+def get_projects(login: str, user: dict) -> dict:
+    tokens = _ensure_tokens(user)
+    h = _headers(tokens)
+    r = requests.get(f"{API_URL}/v1/participants/{login}/projects", headers=h, timeout=10)
+    r.raise_for_status()
+    return r.json()
 
-def fetch_user_projects(login):
-    return _api_get(f"/v1/participants/{login}/projects")
+def get_skills(login: str, user: dict) -> dict:
+    tokens = _ensure_tokens(user)
+    h = _headers(tokens)
+    r = requests.get(f"{API_URL}/v1/participants/{login}/skills", headers=h, timeout=10)
+    r.raise_for_status()
+    return r.json()
 
-def fetch_user_skills(login):
-    return _api_get(f"/v1/participants/{login}/skills")
+def get_badges(login: str, user: dict) -> dict:
+    tokens = _ensure_tokens(user)
+    h = _headers(tokens)
+    r = requests.get(f"{API_URL}/v1/participants/{login}/badges", headers=h, timeout=10)
+    r.raise_for_status()
+    return r.json()
 
-def fetch_user_badges(login):
-    return _api_get(f"/v1/participants/{login}/badges")
-
-def fetch_user_logtime(login):
-    return _api_get(f"/v1/participants/{login}/logtime")
+def get_logtime(login: str, user: dict) -> dict:
+    tokens = _ensure_tokens(user)
+    h = _headers(tokens)
+    r = requests.get(f"{API_URL}/v1/participants/{login}/logtime", headers=h, timeout=10)
+    r.raise_for_status()
+    return r.json()
