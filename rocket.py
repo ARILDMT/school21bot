@@ -1,58 +1,52 @@
 import os
+import random
+import threading
 import requests
 
-ROCKET_CHAT_URL = os.getenv("ROCKET_CHAT_URL")
-ROCKET_CHAT_USER = os.getenv("ROCKET_CHAT_USER")
-ROCKET_CHAT_PASSWORD = os.getenv("ROCKET_CHAT_PASSWORD")
+# Подтягиваем из .env или из переменных окружения
+ROCKET_CHAT_URL = os.getenv("ROCKET_CHAT_URL")        # например: https://rocketchat-student.21-school.ru
+ROCKET_CHAT_TOKEN = os.getenv("ROCKET_CHAT_TOKEN")    # ваш API-ключ или Personal Access Token
+ROCKET_CHAT_USER_ID = os.getenv("ROCKET_CHAT_USER_ID")# userId бота в Rocket.Chat
 
-# Логинимся в Rocket.Chat
-def login_to_rocket_chat():
-    try:
-        response = requests.post(
-            f"{ROCKET_CHAT_URL}/api/v1/login",
-            json={
-                "user": ROCKET_CHAT_USER,
-                "password": ROCKET_CHAT_PASSWORD
-            }
-        )
-        if response.status_code == 200:
-            data = response.json()
-            return data['data']['authToken'], data['data']['userId']
-        else:
-            print("Ошибка логина в Rocket.Chat:", response.text)
-            return None, None
-    except Exception as e:
-        print(f"Ошибка Rocket.Chat: {e}")
-        return None, None
+# Заголовки для REST API Rocket.Chat
+HEADERS = {
+    "X-Auth-Token": ROCKET_CHAT_TOKEN,
+    "X-User-Id": ROCKET_CHAT_USER_ID,
+    "Content-Type": "application/json"
+}
 
-# Отправляем сообщение пользователю
-def send_code_to_user(user_login, code):
-    auth_token, user_id = login_to_rocket_chat()
-    if not auth_token:
-        return False
+# В памяти будем хранить {telegram_user_id: код}
+_codes: dict[str,str] = {}
+_lock = threading.Lock()
 
-    headers = {
-        "X-Auth-Token": auth_token,
-        "X-User-Id": user_id,
-        "Content-type": "application/json"
-    }
+def send_verification_code(telegram_user_id: str) -> None:
+    """
+    Сгенерировать одноразовый 6-значный код, сохранить его и отправить
+    в Rocket.Chat в чат с roomId == telegram_user_id.
+    """
+    code = f"{random.randint(0, 999999):06d}"
+    with _lock:
+        _codes[telegram_user_id] = code
 
     payload = {
-        "roomId": f"@{user_login}",
-        "text": f"Ваш код подтверждения для регистрации в боте: {code}"
+        "roomId": telegram_user_id,
+        "text": f"Ваш проверочный код: {code}"
     }
+    resp = requests.post(
+        f"{ROCKET_CHAT_URL}/api/v1/chat.postMessage",
+        headers=HEADERS,
+        json=payload
+    )
+    resp.raise_for_status()
 
-    try:
-        response = requests.post(
-            f"{ROCKET_CHAT_URL}/api/v1/chat.postMessage",
-            headers=headers,
-            json=payload
-        )
-        if response.status_code == 200:
+def validate_confirmation_code(telegram_user_id: str, code: str) -> bool:
+    """
+    Проверить, совпадает ли присланный пользователем код с сохранённым.
+    Если совпало — удалить из памяти и вернуть True.
+    """
+    with _lock:
+        expected = _codes.get(telegram_user_id)
+        if expected and expected == code:
+            del _codes[telegram_user_id]
             return True
-        else:
-            print("Ошибка отправки сообщения:", response.text)
-            return False
-    except Exception as e:
-        print(f"Ошибка отправки Rocket.Chat: {e}")
-        return False
+    return False
