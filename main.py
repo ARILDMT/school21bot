@@ -39,6 +39,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    from scheduler import start_scheduler
+start_scheduler(app)
 
     # Регистрируем команды
     app.add_handler(CommandHandler("start",       start))
