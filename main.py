@@ -9,7 +9,6 @@ from commands import (
     start,
     auth,
     confirm,
-    setlogin,
     check,
     checkall,
     addfriend,
@@ -23,11 +22,10 @@ from commands import (
     logtime
 )
 
-# Токен бота и порт из ENV
+# Токен и порт из ENV
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-PORT      = int(os.environ.get("PORT", 8080))
+PORT      = int(os.getenv("PORT", 8080))
 
-# Логгирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -35,21 +33,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Глобальный обработчик всех необработанных исключений.
-    """
     logger.error("Exception while handling an update:", exc_info=context.error)
     if hasattr(update, "message") and update.message:
-        await update.message.reply_text("🚨 Упс, что-то пошло не так. Попробуйте позже.")
+        await update.message.reply_text("🚨 Что-то пошло не так. Попробуйте чуть позже.")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Регистрируем все команды
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("auth", auth))
-    app.add_handler(CommandHandler("confirm", confirm))
-    app.add_handler(CommandHandler("setlogin",    setlogin))
+    # Регистрируем команды
+    app.add_handler(CommandHandler("start",       start))
+    app.add_handler(CommandHandler("auth",        auth))
+    app.add_handler(CommandHandler("confirm",     confirm))
     app.add_handler(CommandHandler("check",       check))
     app.add_handler(CommandHandler("checkall",    checkall))
     app.add_handler(CommandHandler("addfriend",   addfriend))
@@ -62,18 +56,18 @@ def main():
     app.add_handler(CommandHandler("mybadges",    mybadges))
     app.add_handler(CommandHandler("logtime",     logtime))
 
-    # Обработчик ошибок
     app.add_error_handler(error_handler)
 
-    # На Render используем вебхуки, локально — polling
+    # Если развернуто на Render — webhook, иначе polling
     if os.getenv("RENDER_EXTERNAL_HOSTNAME"):
         app.run_webhook(
-            listen=f"0.0.0.0",
+            listen="0.0.0.0",
             port=PORT,
             webhook_url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/"
         )
     else:
         app.run_polling()
+
 
 if __name__ == "__main__":
     main()
