@@ -1,180 +1,212 @@
-import datetime
-from rocket import send_verification_code, validate_confirmation_code 
+import os
+import json
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
-from db import (
-    set_user_login, get_user_login, 
-    add_friend, remove_friend, get_friends,
-    add_peer_review, get_peer_reviews, remove_peer_review
-)
 from rocket import send_verification_code, validate_confirmation_code
 from school21_api import (
-    fetch_user_workstation, fetch_user_xp, fetch_user_level,
-    fetch_user_projects, fetch_user_skills, fetch_user_badges,
-    fetch_user_logtime
+    authenticate,
+    get_workstation,
+    get_points,
+    get_participant,
+    get_projects,
+    get_skills,
+    get_badges,
+    get_logtime
 )
+
+DATA_FILE = os.path.join(os.path.dirname(__file__), "data.json")
+if os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "r") as f:
+        DATA = json.load(f)
+else:
+    DATA = {}
+
+def _save():
+    with open(DATA_FILE, "w") as f:
+        json.dump(DATA, f, indent=2)
+
+def _get_user(chat_id: int) -> dict:
+    return DATA.setdefault(str(chat_id), {
+        "login": None,
+        "tokens": None,
+        "friends": []
+    })
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "👋 *Добро пожаловать!*\n\n"
-        "Этот бот помогает студентам Школы 21:\n"
-        "- Отслеживать, кто в кампусе\n"
-        "- Собирать друзей и напоминания\n"
-        "- Планировать peer-review\n\n"
-        "Команды:\n"
-        "/auth `<login>` — получить код в Rocket.Chat\n"
-        "/confirm `<код>` — ввести код и активировать бота\n"
-        "/check `[login]` — проверить кампус\n"
-        "/checkall — сразу всех друзей\n"
-        "/addfriend `<login>` /removefriend `<login>`\n"
-        "/listfriends — список друзей\n"
-        "/setreview `<login>` `<YYYY-MM-DDTHH:MM>`\n"
-        "/listreviews /removereview `<id>`\n"
-        "/myxp /mylevel /myprojects /myskills /mybadges /logtime"
+        "👋 Привет!\n\n"
+        "1️⃣ /auth <login> <password> — авторизация\n"
+        "2️⃣ /check [login] — где человек\n"
+        "3️⃣ /checkall — где ваши друзья\n"
+        "4️⃣ /addfriend <login> 5️⃣ /removefriend <login>\n"
+        "6️⃣ /listfriends — список друзей\n"
+        "7️⃣ /myxp, /mylevel, /myprojects, /myskills, /mybadges, /logtime\n"
     )
     kb = [
-        ["/check","/checkall"],["/myxp","/mylevel"],
-        ["/myprojects","/myskills"],["/addfriend","/removefriend"],
-        ["/setreview","/listreviews"]
+        ["/auth","/check","/checkall"],
+        ["/addfriend","/removefriend","/listfriends"],
+        ["/myxp","/mylevel","/myprojects"],
+        ["/myskills","/mybadges","/logtime"],
     ]
-    await update.message.reply_text(
-        text, 
-        parse_mode="Markdown",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    )
+    await update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
 async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    if not context.args:
-        return await update.message.reply_text("Используйте: /auth <login>")
-    login = context.args[0]
-    set_user_login(tg_id, login)
-    ok = send_verification_code(login, tg_id)
-    msg = "Код отправлен в Rocket.Chat!" if ok else "Ошибка при отправке кода."
-    await update.message.reply_text(msg)
+    chat_id = update.effective_chat.id
+    if len(context.args) != 2:
+        return await update.message.reply_text("Использование: /auth <login> <password>")
+    login, pwd = context.args
+    try:
+        tokens = authenticate(login, pwd)
+    except Exception as e:
+        return await update.message.reply_text(f"Ошибка авторизации: {e}")
+    user = _get_user(chat_id)
+    user["login"] = login
+    user["tokens"] = tokens
+    _save()
+    await update.message.reply_text("✅ Успешно авторизованы!")
 
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    if not context.args:
-        return await update.message.reply_text("Используйте: /confirm <код>")
+    chat_id = update.effective_chat.id
+    user = _get_user(chat_id)
+    if not user["login"]:
+        return await update.message.reply_text("Сначала /auth")
+    if len(context.args) != 1:
+        return await update.message.reply_text("Использование: /confirm <код>")
     code = context.args[0]
-    if validate_confirmation_code(tg_id, code):
-        await update.message.reply_text("✅ Вы успешно авторизованы!")
-    else:
-        await update.message.reply_text("❌ Неверный код. Попробуйте ещё раз.")
+    ok = validate_confirmation_code(user["login"], code)
+    await update.message.reply_text("✅ Код подтверждён!" if ok else "❌ Неверный код.")
 
-# ——— Проверки кампуса —————————————————————————————
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    login = context.args[0] if context.args else get_user_login(tg_id)
-    if not login:
-        return await update.message.reply_text("Сначала /auth <login>!")
-    data = fetch_user_workstation(login)
-    if data and data.get("clusterId"):
-        text = f"✅ `{login}` сейчас в {data['clusterName']} (ряд {data['row']}, место {data['number']})"
-    else:
-        text = f"❌ `{login}` сейчас не в кампусе"
-    await update.message.reply_text(text, parse_mode="Markdown")
+    chat_id = update.effective_chat.id
+    user = _get_user(chat_id)
+    if not user["login"]:
+        return await update.message.reply_text("Сначала /auth")
+    target = context.args[0] if context.args else user["login"]
+    try:
+        ws = get_workstation(target, user)
+        await update.message.reply_text(
+            f"{target} в {ws['clusterName']} ⌚ ряд {ws['row']} место {ws['number']}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
 
 async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    friends = get_friends(tg_id)
-    if not friends:
-        return await update.message.reply_text("У вас нет друзей. /addfriend")
-    msgs = []
-    for fr in friends:
-        data = fetch_user_workstation(fr)
-        status = "в кампусе" if data and data.get("clusterId") else "не в кампусе"
-        msgs.append(f"- `{fr}`: {status}")
-    await update.message.reply_text("\n".join(msgs), parse_mode="Markdown")
+    chat_id = update.effective_chat.id
+    user = _get_user(chat_id)
+    lines = []
+    for f in user["friends"]:
+        try:
+            ws = get_workstation(f, user)
+            lines.append(f"{f}: {ws['clusterName']} {ws['row']}{ws['number']}")
+        except:
+            lines.append(f"{f}: ошибка")
+    await update.message.reply_text("\n".join(lines) or "У вас нет друзей")
 
-# ——— Друзья —————————————————————————————————————————
 async def addfriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     if not context.args:
-        return await update.message.reply_text("Используйте: /addfriend <login>")
-    add_friend(tg_id, context.args[0])
-    await update.message.reply_text("✅ Друг добавлен!")
+        return await update.message.reply_text("Использование: /addfriend <login>")
+    u = _get_user(chat_id)
+    lr = context.args[0]
+    if lr not in u["friends"]:
+        u["friends"].append(lr)
+        _save()
+        await update.message.reply_text(f"✅ {lr} добавлен в друзья")
+    else:
+        await update.message.reply_text("Уже в списке")
 
 async def removefriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     if not context.args:
-        return await update.message.reply_text("Используйте: /removefriend <login>")
-    remove_friend(tg_id, context.args[0])
-    await update.message.reply_text("✅ Друг удалён!")
+        return await update.message.reply_text("Использование: /removefriend <login>")
+    u = _get_user(chat_id)
+    lr = context.args[0]
+    if lr in u["friends"]:
+        u["friends"].remove(lr)
+        _save()
+        await update.message.reply_text(f"✅ {lr} удалён из друзей")
+    else:
+        await update.message.reply_text("Такого нет")
 
 async def listfriends(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    lst = get_friends(tg_id)
-    text = "Список друзей:\n" + "\n".join(f"- {l}" for l in lst) if lst else "У вас нет друзей."
-    await update.message.reply_text(text)
+    chat_id = update.effective_chat.id
+    u = _get_user(chat_id)
+    await update.message.reply_text("\n".join(u["friends"]) or "Список пуст")
 
-# ——— Peer-review в календаре ——————————————————————————
-async def setreview(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    if len(context.args) < 2:
-        return await update.message.reply_text("Используйте: /setreview <login> <YYYY-MM-DDTHH:MM>")
-    login, date = context.args[0], context.args[1]
-    # проверка формата ISO
-    try:
-        datetime.datetime.fromisoformat(date)
-    except ValueError:
-        return await update.message.reply_text("Неверный формат даты.")
-    add_peer_review(tg_id, login, date)
-    await update.message.reply_text("✅ Peer-review запланирован.")
-
-async def listreviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    evs = get_peer_reviews(tg_id)
-    if not evs:
-        return await update.message.reply_text("Нет запланированных peer-review.")
-    text = "\n".join(f"{e['id']}: {e['login']} @ {e['date']}" for e in evs)
-    await update.message.reply_text(text)
-
-async def removereview(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Используйте: /removereview <id>")
-    remove_peer_review(int(context.args[0]))
-    await update.message.reply_text("✅ Удалено.")
-
-# ——— Личные данные —————————————————————————————————————
 async def myxp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    login = get_user_login(tg_id)
-    data = fetch_user_xp(login)
-    await update.message.reply_text(f"PeerReview: {data['peerReviewPoints']}\n"
-                                    f"CodeReview: {data['codeReviewPoints']}\n"
-                                    f"Coins: {data['coins']}")
+    chat_id = update.effective_chat.id
+    u = _get_user(chat_id)
+    if not u["login"]:
+        return await update.message.reply_text("Сначала /auth")
+    try:
+        pts = get_points(u["login"], u)
+        await update.message.reply_text(
+            f"PeerReview: {pts['peerReviewPoints']}\n"
+            f"CodeReview: {pts['codeReviewPoints']}\n"
+            f"Coins: {pts['coins']}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
 
 async def mylevel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    login = get_user_login(tg_id)
-    lvl = fetch_user_level(login)
-    await update.message.reply_text(f"Уровень: {lvl['level']}\nXP: {lvl['exp']}")
+    chat_id = update.effective_chat.id
+    u = _get_user(chat_id)
+    if not u["login"]:
+        return await update.message.reply_text("Сначала /auth")
+    try:
+        p = get_participant(u["login"], u)
+        await update.message.reply_text(
+            f"Уровень: {p['level']}\n"
+            f"XP: {p['expValue']} / {p['expToNextLevel']}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
 
 async def myprojects(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    login = get_user_login(tg_id)
-    projs = fetch_user_projects(login)["projects"]
-    msg = "\n".join(f"{p['title']} — {p['status']}" for p in projs)
-    await update.message.reply_text(msg or "Нет проектов.")
+    chat_id = update.effective_chat.id
+    u = _get_user(chat_id)
+    if not u["login"]:
+        return await update.message.reply_text("Сначала /auth")
+    try:
+        lst = get_projects(u["login"], u)["projects"]
+        lines = [f"{p['title']} — {p['status']}" for p in lst]
+        await update.message.reply_text("\n".join(lines) or "Нет проектов")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
 
 async def myskills(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    login = get_user_login(tg_id)
-    skills = fetch_user_skills(login)["skills"]
-    msg = "\n".join(f"{s['name']}: {s['points']}" for s in skills)
-    await update.message.reply_text(msg or "Нет навыков.")
+    chat_id = update.effective_chat.id
+    u = _get_user(chat_id)
+    if not u["login"]:
+        return await update.message.reply_text("Сначала /auth")
+    try:
+        lst = get_skills(u["login"], u)["skills"]
+        lines = [f"{s['name']}: {s['points']}" for s in lst]
+        await update.message.reply_text("\n".join(lines) or "Нет навыков")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
 
 async def mybadges(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    login = get_user_login(tg_id)
-    badges = fetch_user_badges(login)["badges"]
-    msg = "\n".join(b["name"] for b in badges)
-    await update.message.reply_text(msg or "Нет значков.")
+    chat_id = update.effective_chat.id
+    u = _get_user(chat_id)
+    if not u["login"]:
+        return await update.message.reply_text("Сначала /auth")
+    try:
+        lst = get_badges(u["login"], u)["badges"]
+        lines = [b["name"] for b in lst]
+        await update.message.reply_text("\n".join(lines) or "Нет значков")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
 
 async def logtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = update.effective_user.id
-    login = get_user_login(tg_id)
-    t = fetch_user_logtime(login)
-    await update.message.reply_text(f"Среднее время: {t} часов")
+    chat_id = update.effective_chat.id
+    u = _get_user(chat_id)
+    if not u["login"]:
+        return await update.message.reply_text("Сначала /auth")
+    try:
+        lt = get_logtime(u["login"], u)
+        await update.message.reply_text(
+            f"Среднее время за неделю: {lt.get('logtimeWeeklyAvgHours')} ч."
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
