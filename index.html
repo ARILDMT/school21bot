@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School 21 Bot</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>School 21 Bot</h1>
+            <div id="user-info">
+                <!-- Информация о пользователе будет отображаться здесь -->
+            </div>
+        </header>
+
+        <main>
+            <div class="card" id="auth-card">
+                <h2>Авторизация</h2>
+                <div class="input-group">
+                    <label for="login">Логин School 21</label>
+                    <input type="text" id="login" placeholder="Введите ваш логин">
+                </div>
+                <button id="auth-btn" class="btn primary">Получить код</button>
+                <div class="input-group" id="confirm-group" style="display: none;">
+                    <label for="code">Код подтверждения</label>
+                    <input type="text" id="code" placeholder="Введите код из Rocket.Chat">
+                    <button id="confirm-btn" class="btn primary">Подтвердить</button>
+                </div>
+            </div>
+
+            <div class="card" id="campus-card" style="display: none;">
+                <h2>Кампус</h2>
+                <div class="input-group">
+                    <label for="check-login">Проверить в кампусе</label>
+                    <input type="text" id="check-login" placeholder="Логин для проверки">
+                    <button id="check-btn" class="btn secondary">Проверить</button>
+                </div>
+                <button id="checkall-btn" class="btn primary">Проверить всех друзей</button>
+                <div id="check-results" class="results-box"></div>
+            </div>
+
+            <div class="card" id="friends-card" style="display: none;">
+                <h2>Друзья</h2>
+                <div class="input-group">
+                    <label for="friend-login">Логин друга</label>
+                    <input type="text" id="friend-login" placeholder="Введите логин друга">
+                    <button id="add-friend-btn" class="btn primary">Добавить</button>
+                    <button id="remove-friend-btn" class="btn danger">Удалить</button>
+                </div>
+                <button id="list-friends-btn" class="btn secondary">Список друзей</button>
+                <div id="friends-list" class="results-box"></div>
+            </div>
+
+            <div class="card" id="review-card" style="display: none;">
+                <h2>Peer-Review</h2>
+                <div class="input-group">
+                    <label for="review-login">Логин</label>
+                    <input type="text" id="review-login" placeholder="Логин для peer-review">
+                </div>
+                <div class="input-group">
+                    <label for="review-date">Дата и время</label>
+                    <input type="datetime-local" id="review-date">
+                </div>
+                <button id="set-review-btn" class="btn primary">Запланировать</button>
+                <button id="list-reviews-btn" class="btn secondary">Список peer-review</button>
+                <div id="reviews-list" class="results-box"></div>
+            </div>
+
+            <div class="card" id="stats-card" style="display: none;">
+                <h2>Статистика</h2>
+                <div class="stats-buttons">
+                    <button id="myxp-btn" class="btn secondary">XP</button>
+                    <button id="mylevel-btn" class="btn secondary">Уровень</button>
+                    <button id="myprojects-btn" class="btn secondary">Проекты</button>
+                    <button id="myskills-btn" class="btn secondary">Навыки</button>
+                    <button id="mybadges-btn" class="btn secondary">Значки</button>
+                    <button id="logtime-btn" class="btn secondary">Время</button>
+                </div>
+                <div id="stats-results" class="results-box"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
