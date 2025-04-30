@@ -1,52 +1,40 @@
 import os
-import random
-import threading
 import requests
 
-# Подтягиваем из .env или из переменных окружения
-ROCKET_CHAT_URL = os.getenv("ROCKET_CHAT_URL")        # например: https://rocketchat-student.21-school.ru
-ROCKET_CHAT_TOKEN = os.getenv("ROCKET_CHAT_TOKEN")    # ваш API-ключ или Personal Access Token
-ROCKET_CHAT_USER_ID = os.getenv("ROCKET_CHAT_USER_ID")# userId бота в Rocket.Chat
+# Базовый URL и токены из ENV
+BASE_URL  = os.getenv("ROCKET_CHAT_URL", "").rstrip("/")
+BOT_TOKEN = os.getenv("ROCKET_CHAT_TOKEN", "")
+USER_ID   = os.getenv("ROCKET_CHAT_USER_ID", "")
 
-# Заголовки для REST API Rocket.Chat
 HEADERS = {
-    "X-Auth-Token": ROCKET_CHAT_TOKEN,
-    "X-User-Id": ROCKET_CHAT_USER_ID,
-    "Content-Type": "application/json"
+    "X-Auth-Token": BOT_TOKEN,
+    "X-User-Id"   : USER_ID,
+    "Content-type": "application/json"
 }
 
-# В памяти будем хранить {telegram_user_id: код}
-_codes: dict[str,str] = {}
-_lock = threading.Lock()
-
-def send_verification_code(telegram_user_id: str) -> None:
+def send_verification_code(login: str, tg_id: int) -> bool:
     """
-    Сгенерировать одноразовый 6-значный код, сохранить его и отправить
-    в Rocket.Chat в чат с roomId == telegram_user_id.
+    Шлёт в Rocket.Chat личное сообщение с кодом подтверждения.
+    login — логин пользователя (можно хранить, но для отправки не обязателен).
+    tg_id — Telegram-chat-id, в который слать сообщение.
     """
-    code = f"{random.randint(0, 999999):06d}"
-    with _lock:
-        _codes[telegram_user_id] = code
-
+    # TODO: тут сгенерировать и сохранить код в БД/кэше под этим login
+    code = "123456"
     payload = {
-        "roomId": telegram_user_id,
-        "text": f"Ваш проверочный код: {code}"
+        "channel": str(tg_id),
+        "text"   : f"Ваш код подтверждения для School21-бота: {code}"
     }
     resp = requests.post(
-        f"{ROCKET_CHAT_URL}/api/v1/chat.postMessage",
+        f"{BASE_URL}/api/v1/chat.postMessage",
         headers=HEADERS,
-        json=payload
+        json=payload,
+        timeout=10
     )
-    resp.raise_for_status()
+    return resp.status_code == 200
 
-def validate_confirmation_code(telegram_user_id: str, code: str) -> bool:
+def validate_confirmation_code(login: str, code: str) -> bool:
     """
-    Проверить, совпадает ли присланный пользователем код с сохранённым.
-    Если совпало — удалить из памяти и вернуть True.
+    Проверяет, совпадает ли введённый пользователем код с ожидаемым.
     """
-    with _lock:
-        expected = _codes.get(telegram_user_id)
-        if expected and expected == code:
-            del _codes[telegram_user_id]
-            return True
-    return False
+    # TODO: вместо жёсткого "123456" проверять сохранённый для login код
+    return code == "123456"
