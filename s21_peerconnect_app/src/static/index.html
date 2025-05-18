@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S21 PeerConnect</title>
+    <!-- Placeholder for CSS styles -->
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+        // Placeholder for global JavaScript, like checking auth status
+        // This would ideally be handled by a framework or more structured JS
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("S21 PeerConnect App Initialized");
+            // Example: Check if user is logged in (e.g., by checking a token in localStorage)
+            // If not logged in, redirect to a login page (which we'll build)
+            // For now, this is just a placeholder.
+            const mainContent = document.getElementById('main-content');
+            if (mainContent) {
+                // Initially, we might show a loading state or a login prompt
+                // For now, just a welcome message.
+                // We will replace this with dynamic content loading for different pages.
+                mainContent.innerHTML = '<h1>Добро пожаловать в S21 PeerConnect!</h1><p>Веб-приложение в разработке. Скоро здесь будет крутой UX дизайн!</p><div id="app-root"></div>';
+            }
+        });
+    </script>
+</head>
+<body>
+    <header>
+        <nav>
+            <!-- Navigation will be dynamic based on auth state and page -->
+            <a href="#" id="logo">S21 PeerConnect</a>
+            <ul id="nav-links">
+                <!-- Example links, will be replaced by dynamic router -->
+                <li><a href="#dashboard">Панель управления</a></li>
+                <li><a href="#calendar">Календарь</a></li>
+                <li><a href="#profile">Профиль</a></li>
+                <li><a href="#login">Войти</a></li> <!-- Show if not logged in -->
+                <li><a href="#logout">Выйти</a></li> <!-- Show if logged in -->
+            </ul>
+        </nav>
+    </header>
+
+    <main id="main-content">
+        <!-- Content will be loaded here by JavaScript based on routing -->
+        <!-- Or, for a simpler MPA, each page would be a separate HTML file -->
+    </main>
+
+    <footer>
+        <p>&copy; 2025 S21 PeerConnect. Разработано с любовью (и AI).</p>
+    </footer>
+
+    <!-- Placeholder for JavaScript files -->
+    <!-- <script src="/static/js/app.js"></script> -->
+</body>
+</html>
+
