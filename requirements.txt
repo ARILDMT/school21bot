@@ -5,3 +5,4 @@ apscheduler
 python-dotenv
 Flask-SQLAlchemy
 PyMySQL
+cryptography==36.0.2
