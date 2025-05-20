@@ -4,78 +4,64 @@ from src.models import db, PeerReviewSlot, User
 
 pr_bp = Blueprint("pr_bp", __name__)
 
-# Создать новый слот
-@pr_bp.route("/create_slot", methods=["POST"])
+@pr_bp.route("/slots", methods=["POST"])
 def create_slot():
     data = request.json
-    user_login = data.get("login")
-    timestamp = data.get("timestamp")
+    login = data.get("login")
+    time_str = data.get("scheduled_time")
 
-    if not user_login or not timestamp:
-        return jsonify({"error": "login and timestamp are required"}), 400
-
-    user = User.query.filter_by(school21_login=user_login).first()
+    user = User.query.filter_by(school21_login=login).first()
     if not user:
         return jsonify({"error": "User not found"}), 404
 
     try:
-        dt = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M")
-        slot = PeerReviewSlot(owner_id=user.id, datetime_slot=dt)
-        db.session.add(slot)
-        db.session.commit()
-        return jsonify({"message": "Slot created", "slot_id": slot.id}), 201
-    except Exception as e:
-        return jsonify({"error": "Invalid timestamp format", "details": str(e)}), 400
+        scheduled_time = datetime.fromisoformat(time_str)
+    except Exception:
+        return jsonify({"error": "Invalid datetime format"}), 400
 
-# Получить все слоты
+    slot = PeerReviewSlot(scheduled_time=scheduled_time, owner=user)
+    db.session.add(slot)
+    db.session.commit()
+
+    return jsonify({"message": "Slot created", "slot_id": slot.id})
+
 @pr_bp.route("/slots", methods=["GET"])
-def get_slots():
+def list_slots():
     slots = PeerReviewSlot.query.all()
     return jsonify([
         {
-            "id": slot.id,
-            "owner": slot.owner.school21_login,
-            "datetime": slot.datetime_slot.isoformat(),
-            "booked_by": slot.booked_by.school21_login if slot.booked_by else None
+            "id": s.id,
+            "scheduled_time": s.scheduled_time.isoformat(),
+            "owner": s.owner.school21_login,
+            "booked_by": s.booked_by.school21_login if s.booked_by else None
         }
-        for slot in slots
+        for s in slots
     ])
 
-# Забронировать слот
-@pr_bp.route("/book_slot", methods=["POST"])
-def book_slot():
+@pr_bp.route("/slots/<int:slot_id>/book", methods=["POST"])
+def book_slot(slot_id):
     data = request.json
     login = data.get("login")
-    slot_id = data.get("slot_id")
-
-    if not login or not slot_id:
-        return jsonify({"error": "login and slot_id are required"}), 400
 
     user = User.query.filter_by(school21_login=login).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
     slot = PeerReviewSlot.query.get(slot_id)
+    if not slot or slot.booked_by:
+        return jsonify({"error": "Slot not available"}), 400
 
-    if not user or not slot:
-        return jsonify({"error": "User or slot not found"}), 404
-
-    if slot.booked_by_id:
-        return jsonify({"error": "Slot already booked"}), 400
-
-    slot.booked_by_id = user.id
+    slot.booked_by = user
     db.session.commit()
 
-    return jsonify({"message": "Slot booked"}), 200
+    return jsonify({"message": "Slot booked"})
 
-# Отменить бронь
-@pr_bp.route("/cancel_slot", methods=["POST"])
-def cancel_slot():
-    data = request.json
-    slot_id = data.get("slot_id")
-
+@pr_bp.route("/slots/<int:slot_id>/cancel", methods=["POST"])
+def cancel_slot(slot_id):
     slot = PeerReviewSlot.query.get(slot_id)
     if not slot:
         return jsonify({"error": "Slot not found"}), 404
 
-    slot.booked_by_id = None
+    slot.booked_by = None
     db.session.commit()
-
-    return jsonify({"message": "Slot unbooked"}), 200
+    return jsonify({"message": "Slot canceled"})
